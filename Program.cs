@@ -2,9 +2,11 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.OpenApi.Writers;
 using System.Collections.Generic;
 using System.Drawing;
-using System.Text.Json.Serialization;
+using WebApplication1.Entities;
+using WebApplication1.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -17,6 +19,8 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 // Dodajemy serwis dla kontrolera
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+builder.Services.AddScoped<WojewodztwoService>();
+builder.Services.AddScoped<PowiatService>();
 
 var app = builder.Build();
 
@@ -32,18 +36,18 @@ using (var scope = app.Services.CreateScope())
     context.Database.EnsureCreated();
 }
 
-// Dodajemy
+    // Dodajemy
 
-//Gety - pobieranie list
-app.MapGet("/api/wojewodztwa", (AppDbContext dbContext) =>
-{
-    var listaWojewodztw = dbContext.listaWojewodztw.Include(m => m.listaPowiatow).ToList();
-    return Results.Ok(listaWojewodztw);
-});
+    //Gety - pobieranie list
+app.MapGet("/api/wojewodztwa", (WojewodztwoService wojewodztwoService) =>
+    {
+        var listaWojewodztw = wojewodztwoService.GetAll();
+        return Results.Ok(listaWojewodztw);
+    });
 
-app.MapGet("/api/powiaty", (AppDbContext dbContext) =>
+app.MapGet("/api/powiaty", (PowiatService powiatService) =>
 {
-    var listaPowiatow = dbContext.listaPowiatow.Include(m => m.listaGmin).ToList();
+    var listaPowiatow = powiatService.GetAll();
     return Results.Ok(listaPowiatow);
 });
 
@@ -60,21 +64,16 @@ app.MapGet("/api/miasta", (AppDbContext dbContext) =>
 });
 
 //Posty - nowe obiekty
-app.MapPost("/api/wojewodztwo", async (AppDbContext dbContext, Wojewodztwo wojewodztwo) =>
+app.MapPost("/api/wojewodztwo", async (WojewodztwoService wojewodztwoService, Wojewodztwo wojewodztwo) =>
 {
-    dbContext.listaWojewodztw.Add(wojewodztwo);
-    await dbContext.SaveChangesAsync();
-    return Results.Created($"Województwo: {wojewodztwo.Name} zosta³o stworzone.", wojewodztwo);
+    wojewodztwoService.Create(wojewodztwo);
+    return Results.Created($"/api/wojewodztwa", wojewodztwo);
 });
 
-app.MapPost("/api/powiat", async (AppDbContext dbContext, Powiat powiat) =>
+app.MapPost("/api/powiat", async (PowiatService powiatService, Powiat powiat) =>
 {
-    var wojewodztwo = dbContext.listaWojewodztw.FirstOrDefault(w => w.Id == powiat.WojewodztwoId);
-    if( wojewodztwo == null) { return Results.NotFound("Nie znaleziono takiego województwa."); }
-
-    dbContext.listaPowiatow.Add(powiat);
-    await dbContext.SaveChangesAsync();
-    return Results.Created($"Powiat: {powiat.Id} zosta³ stworzony.", powiat);
+    powiatService.Create(powiat);
+    return Results.Created($"/api/powiaty/", powiat);
 });
 
 app.MapPost("/api/gmina", async (AppDbContext dbContext, Gmina gmina) =>
@@ -84,7 +83,7 @@ app.MapPost("/api/gmina", async (AppDbContext dbContext, Gmina gmina) =>
 
     dbContext.listaGmin.Add(gmina);
     await dbContext.SaveChangesAsync();
-    return Results.Created($"Gmina: {gmina.Id} zosta³a stworzona.", gmina);
+    return Results.Created($"/api/gminy", gmina);
 });
 
 app.MapPost("/api/miasto", async (AppDbContext dbContext, Miasto miasto) =>
@@ -102,42 +101,20 @@ app.MapPost("/api/miasto", async (AppDbContext dbContext, Miasto miasto) =>
     wojewodztwo.Population += miasto.Population;
 
     await dbContext.SaveChangesAsync();
-    return Results.Created($"Miasto: {miasto.Id} zosta³o stworzone.", miasto);
+    return Results.Created($"/api/miasta", miasto);
 });
 
-//Posty - ustalanie stolic----------------------------------------------------------------------------------------------------------------------
-app.MapPost("/api/wojewodztwo/setcapital", async (AppDbContext dbContext, int wojewodztwoId, int miastoId) =>
+//Posty - ustalanie stolic
+app.MapPost("/api/wojewodztwo/setcapital", async (WojewodztwoService wojewodztwoService, AppDbContext dbContext, int wojewodztwoId, int miastoId) =>
 {
-    var wojewodztwo = dbContext.listaWojewodztw.FirstOrDefault(w => w.Id == wojewodztwoId);
-    var miasto = dbContext.listaMiast.FirstOrDefault(m => m.Id == miastoId);
-
-    if(wojewodztwo == null) { return Results.BadRequest("Nie ma takiego województwa!"); }
-    if(miasto == null) { return Results.BadRequest("Nie ma takiego miasta!"); }
-    if(wojewodztwo.MiastoId != null) { return Results.BadRequest("Wojewodztwo ma ju¿ stolicê!"); }
-    if(miasto.isCapital) { return Results.BadRequest("Miasto jest ju¿ stolic¹!"); }
-
-    wojewodztwo.MiastoId = miastoId;
-    miasto.isCapital = true;
-
-    await dbContext.SaveChangesAsync();
-    return Results.Ok($"{miasto.Name} zosta³o stolic¹ {wojewodztwo.Name}.");
+    wojewodztwoService.SetCapital(wojewodztwoId, miastoId);
+    return Results.Ok($"Ustawiono stolicê.");
 });
 
-app.MapPost("/api/powiat/setcapital", async (AppDbContext dbContext, int powiatId, int miastoId) =>
+app.MapPost("/api/powiat/setcapital", async (PowiatService powiatService, int powiatId, int miastoId) =>
 {
-    var powiat = dbContext.listaPowiatow.FirstOrDefault(p => p.Id == powiatId);
-    var miasto = dbContext.listaMiast.FirstOrDefault(m => m.Id == miastoId);
-
-    if (powiat == null) { return Results.BadRequest("Nie ma takiego powiatu!"); }
-    if (miasto == null) { return Results.BadRequest("Nie ma takiego miasta!"); }
-    if (powiat.MiastoId != null) { return Results.BadRequest("Powiat ma ju¿ stolicê!"); }
-    if (miasto.isCapital) { return Results.BadRequest("Miasto jest ju¿ stolic¹!"); }
-
-    powiat.MiastoId = miastoId;
-    miasto.isCapital = true;
-
-    await dbContext.SaveChangesAsync();
-    return Results.Ok($"{miasto.Name} zosta³o stolic¹ {powiat.Name}.");
+    powiatService.SetCapital(powiatId, miastoId);
+    return Results.Ok($"Ustawiono stolicê.");
 });
 
 app.MapPost("/api/gmina/setcapital", async (AppDbContext dbContext, int gminaId, int miastoId) =>
@@ -159,67 +136,15 @@ app.MapPost("/api/gmina/setcapital", async (AppDbContext dbContext, int gminaId,
 
 //Delety - usuwamy obiekty
 
-app.MapDelete("/api/wojewodztwo", async (AppDbContext dbContext, int idWojewodztwa) =>
+app.MapDelete("/api/wojewodztwo", async (WojewodztwoService wojewodztwoService, AppDbContext dbContext, int idWojewodztwa) =>
 {
-    var wojewodztwo = dbContext.listaWojewodztw.FirstOrDefault(w => w.Id == idWojewodztwa);
-
-
-    if (wojewodztwo==null) { return Results.NotFound("Nie znaleziono takiego wojewodztwa!"); }
-    // Pobieranie wszystkich powiatów, gmin i miast zwi¹zanych z województwem
-    var powiatyDoUsuniecia = dbContext.listaPowiatow.Where(p => p.WojewodztwoId == idWojewodztwa).ToList();
-    var gminyDoUsuniecia = dbContext.listaGmin
-                                    .Where(g => powiatyDoUsuniecia
-                                    .Select(p => p.Id)
-                                    .Contains(g.PowiatId))
-                                    .ToList();
-    var miastaDoUsuniecia = dbContext.listaMiast
-                                     .Where(m => gminyDoUsuniecia
-                                     .Select(m=> m.Id)
-                                     .Contains(m.GminaId))
-                                     .ToList();
-
-    // Usuwanie miast
-    dbContext.listaMiast.RemoveRange(miastaDoUsuniecia);
-
-    // Usuwanie gmin
-    dbContext.listaGmin.RemoveRange(gminyDoUsuniecia);
-
-    // Usuwanie powiatów
-    dbContext.listaPowiatow.RemoveRange(powiatyDoUsuniecia);
-
-    // Usuwanie województwa
-    dbContext.listaWojewodztw.Remove(wojewodztwo);
-
-    await dbContext.SaveChangesAsync();
+    wojewodztwoService.Delete(idWojewodztwa);
     return Results.Ok("Poprawnie usuniêto wojewodztwo.");
 });
 
-app.MapDelete("/api/powiat", async (AppDbContext dbContext, int idPowiatu) =>
+app.MapDelete("/api/powiat", async (PowiatService powiatService, int idPowiatu) =>
 {
-    var powiat = dbContext.listaPowiatow.FirstOrDefault(p=> p.Id == idPowiatu);
-
-    if (powiat == null) { return Results.NotFound("Nie znaleziono takiego powiatu!"); }
-
-    var wojewodztwo = dbContext.listaWojewodztw.FirstOrDefault(w => w.Id == powiat.WojewodztwoId);
-    wojewodztwo.Population -= powiat.Population;
-
-    var gminyDoUsuniecia = dbContext.listaGmin.Where(p => p.PowiatId == idPowiatu).ToList();
-    var miastaDoUsuniecia = dbContext.listaMiast
-                                     .Where(m => gminyDoUsuniecia
-                                     .Select(m => m.Id)
-                                     .Contains(m.GminaId))
-                                     .ToList();
-
-    // Usuwanie miast
-    dbContext.listaMiast.RemoveRange(miastaDoUsuniecia);
-
-    // Usuwanie gmin
-    dbContext.listaGmin.RemoveRange(gminyDoUsuniecia);
-
-    // Usuwanie powiatów
-    dbContext.listaPowiatow.Remove(powiat);
-
-    await dbContext.SaveChangesAsync();
+    powiatService.Delete(idPowiatu);
     return Results.Ok("Poprawnie usuniêto powiat.");
 });
 
@@ -309,3 +234,9 @@ public class AppDbContext : DbContext
     public DbSet<Gmina> listaGmin { get; set; }
     public DbSet<Miasto> listaMiast { get; set; }
 }
+
+
+
+
+
+//Dodaj serwisy dla gmin i miasta, wywal modele do osobnego folderu
