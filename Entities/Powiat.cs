@@ -8,7 +8,7 @@ namespace WebApplication1.Entities
         public string Name { get; set; }
         public int Population { get; set; }
         public int WojewodztwoId { get; set; }
-        public ICollection<Gmina> listaGmin { get; set; } = new List<Gmina>();
+        public virtual ICollection<Gmina> listaGmin { get; set; } = new List<Gmina>();
         [Display(Name = "Stolica")]
         public int? MiastoId { get; set; }
     }

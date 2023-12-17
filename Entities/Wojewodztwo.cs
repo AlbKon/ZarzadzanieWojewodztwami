@@ -7,7 +7,7 @@ namespace WebApplication1.Entities
         public int Id { get; set; }
         public string Name { get; set; }
         public int Population { get; set; }
-        public ICollection<Powiat> listaPowiatow { get; set; } = new List<Powiat>();
+        public virtual ICollection<Powiat> listaPowiatow { get; set; } = new List<Powiat>();
         [Display(Name = "Stolica")]
         public int? MiastoId { get; set; }
     }
